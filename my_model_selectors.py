@@ -39,11 +39,13 @@ class ModelSelector(object):
             hmm_model = GaussianHMM(n_components=num_states, covariance_type="diag", n_iter=1000,
                                     random_state=self.random_state, verbose=False).fit(self.X, self.lengths)
             if self.verbose:
-                print("model created for {} with {} states".format(self.this_word, num_states))
+                print("model created for {} with {} states".format(
+                    self.this_word, num_states))
             return hmm_model
         except:
             if self.verbose:
-                print("failure on {} with {} states".format(self.this_word, num_states))
+                print("failure on {} with {} states".format(
+                    self.this_word, num_states))
             return None
 
 
@@ -73,11 +75,41 @@ class SelectorBIC(ModelSelector):
         BIC score for n between self.min_n_components and self.max_n_components
 
         :return: GaussianHMM object
+
+        Assume 
+           - of features = d
+           - of HMM states = n
+        Then # of parameters = 
+            # of probabilities in transition matrix + 
+            # of Gaussian mean + 
+            # of Gaussian variance = 
+            n*(n-1) + 2*d*n
+
+            BUT the initial distribution is not estimated so it is learned by HMM for us
+            thus another n-1 parameters so in total
+            p = n*(n-1) + (n-1) + 2*d*n = n*n  + 2*d*n - 1 
+            (https://ai-nd.slack.com/files/ylu/F4S90AJFR/number_of_parameters_in_bic.txt)
+
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        # implement model selection based on BIC scores
+        best_score = float("inf")
+        best_model = self.base_model(self.min_n_components)
+
+        for n in range(self.min_n_components, self.max_n_components + 1):
+            try:
+                model = self.base_model(n)
+                p = n ** 2 + 2 * self.X.shape[1] * n - 1
+                logN = np.log(self.X.shape[0])
+                logL = model.score(self.X, self.lengths)
+                score = -2 * logL + p * logN
+                if score < best_score:
+                    best_score = score
+                    best_model = model
+            except:
+                pass
+        return best_model
 
 
 class SelectorDIC(ModelSelector):
@@ -92,8 +124,25 @@ class SelectorDIC(ModelSelector):
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        # implement model selection based on DIC scores
+        best_score = float('-inf')
+        best_model = self.base_model(self.min_n_components)
+
+        for n in range(self.min_n_components, self.max_n_components + 1):
+            try:
+                model = self.base_model(n)
+                score_for_word = model.score(self.X, self.lengths)
+                scores_for_words = [model.score(
+                    x, length) for word, (x, length) in self.hwords.items() if word != self.this_word]
+                score = score_for_word - np.mean(scores_for_words)
+
+                if score > best_score:
+                    best_score = score
+                    best_model = model
+            except:
+                pass
+
+        return best_model
 
 
 class SelectorCV(ModelSelector):
@@ -104,5 +153,27 @@ class SelectorCV(ModelSelector):
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection using CV
-        raise NotImplementedError
+        # implement model selection using CV
+        best_score = float('-inf')
+        best_model = self.base_model(self.min_n_components)
+
+        for n in range(self.min_n_components, self.max_n_components + 1):
+            try:
+                model = self.base_model(n)
+                scores = []
+                fold = KFold()
+                
+                for tr_idx, ts_idx in fold.split(self.sequences):
+                    train_x, train_len = combine_sequences(tr_idx, self.sequences)
+                    test_x, test_len = combine_sequences(ts_idx, self.sequences)
+                    model.fit(train_x, train_len)
+                    scores.append(model.score(test_x, test_len))
+
+                score = statistics.mean(scores)
+                if score > best_score:
+                    best_score = score
+                    best_model = model
+            except:
+                pass
+
+        return best_model
